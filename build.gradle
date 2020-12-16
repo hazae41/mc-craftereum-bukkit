@@ -1,0 +1,36 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.kotlin.jvm' version '1.4.20'
+    id "org.web3j" version "4.8.1"
+}
+
+group 'hazae41'
+version '1.0'
+
+compileKotlin {
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+web3j {
+    generatedFilesBaseDir = "src"
+}
+
+repositories {
+    mavenCentral()
+    jcenter()
+    maven { url = 'https://oss.sonatype.org/content/repositories/snapshots' }
+    maven { url = 'https://hub.spigotmc.org/nexus/content/repositories/snapshots/' }
+    flatDir { dirs 'libs' }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib"
+    implementation 'org.spigotmc:spigot-api:1.16.2-R0.1-SNAPSHOT'
+    implementation name: "Vault"
+}
+
+jar {
+    from configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+}

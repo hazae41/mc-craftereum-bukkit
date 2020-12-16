@@ -1,0 +1,12 @@
+name: Craftereum
+main: hazae41.craftereum.Main
+description: Craftereum
+api-version: 1.16
+version: 1.0
+author: hazae41
+depend: [ Vault ]
+commands:
+  "craftereum":
+    description: Craftereum
+    aliases: [ "eth" ]
+    usage: /eth transfer <address> <amount>
