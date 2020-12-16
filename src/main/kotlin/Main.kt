@@ -67,7 +67,7 @@ class Main : JavaPlugin() {
     craftereum.cancelEventFlowable(lastBlock, LATEST)
       .subscribe { onCancelEvent(it) }
 
-    getCommand("$")?.apply {
+    getCommand("craftereum")?.apply {
       setExecutor { sender, _, _, args ->
         if (sender is Player)
           sender.onCommand(args)
