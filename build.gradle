@@ -27,10 +27,19 @@ repositories {
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib"
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.4.2'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.4.2'
     implementation 'org.spigotmc:spigot-api:1.16.2-R0.1-SNAPSHOT'
+    compile "org.web3j:core:4.7.0"
     implementation name: "Vault"
 }
 
 jar {
     from configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    exclude 'META-INF/*.RSA', 'META-INF/*.SF', 'META-INF/*.DSA'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
 }

@@ -1,5 +1,9 @@
 package hazae41.craftereum
 
+import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.future.await
+import kotlinx.coroutines.launch
 import net.milkbowl.vault.economy.Economy
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
@@ -13,48 +17,46 @@ import org.web3j.crypto.Credentials
 import org.web3j.protocol.Web3j
 import org.web3j.protocol.core.DefaultBlockParameter
 import org.web3j.protocol.core.DefaultBlockParameterName.LATEST
-import org.web3j.protocol.core.methods.response.TransactionReceipt
-import org.web3j.protocol.websocket.WebSocketService
-import org.web3j.tx.Transfer
+import org.web3j.protocol.http.HttpService
 import org.web3j.tx.gas.DefaultGasProvider
-import org.web3j.utils.Convert.Unit.ETHER
 import java.io.File
-import java.math.BigDecimal
 import java.math.BigInteger
 import java.util.*
 
 class Main : JavaPlugin() {
-  val economy = server.servicesManager
-    .getRegistration(Economy::class.java)!!
-    .provider
 
   lateinit var web3: Web3j
   lateinit var credentials: Credentials
   lateinit var craftereum: Craftereum
+  lateinit var economy: Economy
 
-  val listeners = mutableMapOf<BigInteger, Listener>()
+  val listeners = mutableMapOf<Long, Listener>()
 
   override fun onEnable() {
     super.onEnable()
 
     saveDefaultConfig()
 
+    economy = server.servicesManager
+      .getRegistration(Economy::class.java)!!
+      .provider
+
     credentials = File(dataFolder, "privkey.txt").run {
       if (!exists()) throw Exception("No privkey.txt")
       Credentials.create(readText())
     }
 
-    val url = config.getString("websocket")
+    val url = config.getString("address")
       ?: throw Exception("No WebSocket URL")
 
-    val address = config.getString("address")
+    val address = config.getString("contract")
       ?: throw Exception("No contract address")
 
     val lastBlock = config.getString("last-block")?.let {
       DefaultBlockParameter.valueOf(BigInteger(it))
     } ?: throw Exception("Invalid last block")
 
-    web3 = Web3j.build(WebSocketService(url, false))
+    web3 = Web3j.build(HttpService(url))
 
     craftereum = Craftereum.load(address, web3, credentials, DefaultGasProvider())
 
@@ -65,12 +67,12 @@ class Main : JavaPlugin() {
       .subscribe { onKillEvent(it) }
 
     craftereum.cancelEventFlowable(lastBlock, LATEST)
-      .subscribe { onCancelEvent(it) }
+      .subscribe { cancel(it.eventid) }
 
     getCommand("craftereum")?.apply {
       setExecutor { sender, _, _, args ->
         if (sender is Player)
-          sender.onCommand(args)
+          onCommand(sender, args)
         true
       }
     }
@@ -82,49 +84,42 @@ class Main : JavaPlugin() {
     web3.shutdown()
   }
 
-  fun transfer(target: String, amount: BigDecimal): TransactionReceipt {
-    return Transfer.sendFunds(web3, credentials, target, amount, ETHER).send()
-  }
-
-  fun Player.onCommand(args: Array<String>): Boolean {
+  fun onCommand(player: Player, args: Array<String>): Boolean {
     val sub = args.getOrNull(0)
 
     if (sub == "transfer") {
       val target = args.getOrNull(1)
         ?: return false
-      val amount = args.getOrNull(2)?.toDoubleOrNull()
+      val amount = args.getOrNull(2)?.toIntOrNull()
         ?: return false
 
-      val res = economy.withdrawPlayer(this, amount)
-      if (!res.transactionSuccess()) return true
+      GlobalScope.launch(IO) {
+        try {
+          val res = economy.withdrawPlayer(player, amount.toDouble())
+          if (!res.transactionSuccess()) return@launch
 
-      try {
-        sendMessage("§aPending transaction...")
-        val receipt = transfer(target, amount.toBigDecimal())
+          player.sendMessage("§aPending transaction...")
 
-        if (!receipt.isStatusOK)
-          throw Exception(receipt.revertReason)
+          val receipt = craftereum
+            ._transfer(target, amount.toBigInteger())
+            .sendAsync().await()
 
-        sendMessage("§aTransaction done!")
-      } catch (e: Exception) {
-        logger.warning(e.message)
-        sendMessage("§cTransaction failed")
-        economy.depositPlayer(this, amount)
+          if (!receipt.isStatusOK)
+            throw Exception(receipt.revertReason)
+
+          player.sendMessage("§aTransaction done!")
+
+        } catch (e: Exception) {
+          logger.warning(e.message)
+          player.sendMessage("§cTransaction failed")
+          economy.depositPlayer(player, amount.toDouble())
+        }
       }
 
       return true
     }
 
     return false
-  }
-
-  fun onCancelEvent(e: Craftereum.CancelEventResponse) {
-    val receipt = craftereum._cancelled(e.eventid).send()
-
-    if (!receipt.isStatusOK)
-      throw Exception(receipt.revertReason)
-
-    cancel(e.eventid)
   }
 
   fun onTransferEvent(e: Craftereum.TransferEventResponse) {
@@ -140,13 +135,13 @@ class Main : JavaPlugin() {
   fun onKillEvent(e: Craftereum.OnKillEventResponse) {
     val listener = KillListener(e.eventid, e.killer, e.target)
     server.pluginManager.registerEvents(listener, this)
-    listeners[e.eventid] = listener
+    listeners[e.eventid.toLong()] = listener
   }
 
   fun cancel(eventid: BigInteger) {
-    val listener = listeners[eventid]!!
+    val listener = listeners[eventid.toLong()]!!
     HandlerList.unregisterAll(listener)
-    listeners.remove(eventid)
+    listeners.remove(eventid.toLong())
   }
 
   inner class KillListener(
@@ -167,12 +162,14 @@ class Main : JavaPlugin() {
       if (this.targetid.isNotEmpty())
         if (targetid != this.targetid) return
 
-      val receipt = craftereum
-        ._killed(eventid, killerid, targetid)
-        .send()
+      GlobalScope.launch(IO) {
+        val receipt = craftereum
+          ._killed(eventid, killerid, targetid)
+          .sendAsync().await()
 
-      if (!receipt.isStatusOK)
-        throw Exception(receipt.revertReason)
+        if (!receipt.isStatusOK)
+          throw Exception(receipt.revertReason)
+      }
     }
   }
 }
