@@ -17,7 +17,7 @@ import org.web3j.crypto.Credentials
 import org.web3j.protocol.Web3j
 import org.web3j.protocol.core.DefaultBlockParameter
 import org.web3j.protocol.core.DefaultBlockParameterName.LATEST
-import org.web3j.protocol.http.HttpService
+import org.web3j.protocol.websocket.WebSocketService
 import org.web3j.tx.gas.DefaultGasProvider
 import java.io.File
 import java.math.BigInteger
@@ -26,7 +26,6 @@ import java.util.*
 class Main : JavaPlugin() {
 
   lateinit var web3: Web3j
-  lateinit var credentials: Credentials
   lateinit var craftereum: Craftereum
   lateinit var economy: Economy
 
@@ -41,7 +40,7 @@ class Main : JavaPlugin() {
       .getRegistration(Economy::class.java)!!
       .provider
 
-    credentials = File(dataFolder, "privkey.txt").run {
+    val credentials = File(dataFolder, "privkey.txt").run {
       if (!exists()) throw Exception("No privkey.txt")
       Credentials.create(readText())
     }
@@ -56,7 +55,7 @@ class Main : JavaPlugin() {
       DefaultBlockParameter.valueOf(BigInteger(it))
     } ?: throw Exception("Invalid last block")
 
-    web3 = Web3j.build(HttpService(url))
+    web3 = Web3j.build(WebSocketService(url, false))
 
     craftereum = Craftereum.load(address, web3, credentials, DefaultGasProvider())
 
@@ -125,8 +124,8 @@ class Main : JavaPlugin() {
   fun onTransferEvent(e: Craftereum.TransferEventResponse) {
     val uuid = UUID.fromString(e.player)
     val player = server.getOfflinePlayer(uuid)
-
     economy.depositPlayer(player, e.amount.toDouble())
+    println("Transferred ${e.amount} to ${e.player}")
 
     val currency = economy.currencyNamePlural()
     player.player?.sendMessage("§aYou received ${e.amount} $currency")
@@ -136,12 +135,14 @@ class Main : JavaPlugin() {
     val listener = KillListener(e.eventid, e.killer, e.target)
     server.pluginManager.registerEvents(listener, this)
     listeners[e.eventid.toLong()] = listener
+    println("Registered kill listener ${e.eventid}")
   }
 
   fun cancel(eventid: BigInteger) {
     val listener = listeners[eventid.toLong()]!!
     HandlerList.unregisterAll(listener)
     listeners.remove(eventid.toLong())
+    println("Cancelled listener $eventid")
   }
 
   inner class KillListener(
