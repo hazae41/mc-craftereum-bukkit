@@ -23,6 +23,18 @@ import java.io.File
 import java.math.BigInteger
 import java.util.*
 
+fun String.toUUID() = try {
+  UUID.fromString(this)
+} catch (e: Exception) {
+  null
+}
+
+fun blockParam(number: Long) =
+  DefaultBlockParameter.valueOf(BigInteger.valueOf(number))
+
+fun blockParam(number: String) =
+  DefaultBlockParameter.valueOf(BigInteger(number))
+
 class Main : JavaPlugin() {
 
   lateinit var web3: Web3j
@@ -51,21 +63,26 @@ class Main : JavaPlugin() {
     val address = config.getString("contract")
       ?: throw Exception("No contract address")
 
-    val lastBlock = config.getString("last-block")?.let {
-      DefaultBlockParameter.valueOf(BigInteger(it))
-    } ?: throw Exception("Invalid last block")
+    val lastBlock = config.getString("last-block")
+      ?.let { blockParam(it) }
+      ?: throw Exception("Invalid last block")
 
-    web3 = Web3j.build(WebSocketService(url, false))
+    val webSocket = WebSocketService(url, false)
+      .apply { connect() }
+
+    logger.info("Connected")
+
+    web3 = Web3j.build(webSocket)
 
     craftereum = Craftereum.load(address, web3, credentials, DefaultGasProvider())
 
     craftereum.transferEventFlowable(lastBlock, LATEST)
       .subscribe { onTransferEvent(it) }
 
-    craftereum.onKillEventFlowable(lastBlock, LATEST)
+    craftereum.onKillEventFlowable(blockParam(0), LATEST)
       .subscribe { onKillEvent(it) }
 
-    craftereum.cancelEventFlowable(lastBlock, LATEST)
+    craftereum.cancelEventFlowable(blockParam(0), LATEST)
       .subscribe { cancel(it.eventid) }
 
     getCommand("craftereum")?.apply {
@@ -75,6 +92,11 @@ class Main : JavaPlugin() {
         true
       }
     }
+  }
+
+  fun setLastBlock(number: BigInteger) {
+    config.set("last-block", number.toString())
+    saveConfig()
   }
 
   override fun onDisable() {
@@ -122,7 +144,9 @@ class Main : JavaPlugin() {
   }
 
   fun onTransferEvent(e: Craftereum.TransferEventResponse) {
-    val uuid = UUID.fromString(e.player)
+    setLastBlock(e.log.blockNumber)
+
+    val uuid = e.player.toUUID() ?: return
     val player = server.getOfflinePlayer(uuid)
     economy.depositPlayer(player, e.amount.toDouble())
     println("Transferred ${e.amount} to ${e.player}")
@@ -139,7 +163,9 @@ class Main : JavaPlugin() {
   }
 
   fun cancel(eventid: BigInteger) {
-    val listener = listeners[eventid.toLong()]!!
+    val listener = listeners[eventid.toLong()]
+      ?: return
+
     HandlerList.unregisterAll(listener)
     listeners.remove(eventid.toLong())
     println("Cancelled listener $eventid")
